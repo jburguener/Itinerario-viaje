@@ -365,9 +365,8 @@
     }catch(e){ return false; }
   }
   var LOCAL_OK = (typeof window.localStorage !== 'undefined') && testLocalStorage();
-  var SYNC_ID_KEY = 'itinerario_sync_id_v1';
-  var SYNC_BASE = 'https://kvdb.io';
-  var SYNC_KEY_NAME = 'itinerary';
+  var SYNC_ID_KEY = 'itinerario_sync_id_v1'; // holds "gistId::token"
+  var GIST_FILENAME = 'itinerario-sync.json';
   var POLL_MS = 17000;
 
   var syncId = null;
@@ -394,33 +393,70 @@
     try{ var raw = window.localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
   }
 
-  // Nota técnica: usamos KVdb.io porque está pensado explícitamente para
-  // llamarse desde JavaScript de navegador (a diferencia de otras opciones
-  // que probamos). Evitamos poner Content-Type: application/json a propósito
-  // — así el pedido queda como "simple request" y no dispara un preflight
-  // CORS que muchos servicios gratuitos no manejan bien.
-  async function remoteGet(id){
-    var res = await fetch(SYNC_BASE + '/' + id + '/' + SYNC_KEY_NAME);
+  // Nota técnica: usamos la API de GitHub (Gists) como backend de
+  // sincronización. Probamos dos servicios gratuitos de "JSON storage"
+  // pensados justamente para esto y ambos bloqueaban el POST de creación
+  // (probablemente protección anti-bot) aunque el GET funcionaba bien.
+  // La API de GitHub es infraestructura mucho más sólida y ya confirmamos
+  // que responde bien desde este mismo navegador. El "código" de
+  // sincronización combina el id del gist y un token personal de acceso
+  // (con permiso únicamente de "gist"), separados por "::".
+  function parseSyncCode(code){
+    var parts = (code||'').split('::');
+    return {gistId: parts[0], token: parts[1] || ''};
+  }
+  async function remoteGet(code){
+    var p = parseSyncCode(code);
+    var headers = {'Accept':'application/vnd.github+json'};
+    if(p.token) headers['Authorization'] = 'token ' + p.token;
+    var res = await fetch('https://api.github.com/gists/' + p.gistId, {headers: headers});
     if(res.status === 404) throw new Error('código no encontrado (404)');
     if(!res.ok) throw new Error('HTTP '+res.status);
-    var text = await res.text();
-    if(!text) throw new Error('sin datos guardados todavía');
-    return JSON.parse(text);
+    var gist = await res.json();
+    var file = gist.files && gist.files[GIST_FILENAME];
+    if(!file || !file.content) throw new Error('sin datos guardados todavía');
+    return JSON.parse(file.content);
   }
   async function remoteCreate(data){
-    var bres = await fetch(SYNC_BASE + '/', { method:'POST', body: 'email=itinerario-app@example.com' });
-    if(!bres.ok) throw new Error('HTTP '+bres.status+' creando el código');
-    var id = (await bres.text()).trim();
-    if(!id) throw new Error('el servicio no devolvió un código');
-    await remotePut(id, data);
-    return id;
+    var token = getGhToken();
+    if(!token) throw new Error('falta conectar un token de GitHub primero');
+    var res = await fetch('https://api.github.com/gists', {
+      method: 'POST',
+      headers: {'Authorization':'token '+token, 'Content-Type':'application/json', 'Accept':'application/vnd.github+json'},
+      body: JSON.stringify({
+        description: 'Itinerario de viaje (sincronización privada)',
+        public: false,
+        files: makeFilesPayload(data)
+      })
+    });
+    if(!res.ok) throw new Error('HTTP '+res.status+' creando el código');
+    var gist = await res.json();
+    if(!gist.id) throw new Error('GitHub no devolvió un id');
+    return gist.id + '::' + token;
   }
-  async function remotePut(id, data){
-    var res = await fetch(SYNC_BASE + '/' + id + '/' + SYNC_KEY_NAME, {
-      method: 'POST', body: JSON.stringify(data)
+  async function remotePut(code, data){
+    var p = parseSyncCode(code);
+    var res = await fetch('https://api.github.com/gists/' + p.gistId, {
+      method: 'PATCH',
+      headers: {'Authorization':'token '+p.token, 'Content-Type':'application/json', 'Accept':'application/vnd.github+json'},
+      body: JSON.stringify({ files: makeFilesPayload(data) })
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
   }
+  function makeFilesPayload(data){
+    var o = {}; o[GIST_FILENAME] = {content: JSON.stringify(data)}; return o;
+  }
+
+  var GH_TOKEN_KEY = 'itinerario_gh_token_v1';
+  function getGhToken(){
+    if(!LOCAL_OK) return null;
+    try{ return window.localStorage.getItem(GH_TOKEN_KEY) || null; }catch(e){ return null; }
+  }
+  function setGhToken(t){
+    if(!LOCAL_OK) return;
+    try{ if(t) window.localStorage.setItem(GH_TOKEN_KEY, t); else window.localStorage.removeItem(GH_TOKEN_KEY); }catch(e){}
+  }
+
 
   async function loadState(){
     syncId = getSyncId();
@@ -1091,11 +1127,14 @@
     html += '<button class="btn ghost full" onclick="App.addCitySettings()">+ Agregar ciudad</button>';
 
     html += '<div class="section-label">Sincronización en pareja<div class="line"></div></div>';
-    html += '<button class="icon-btn" onclick="App.testConnection()" style="margin-bottom:10px;">🔧 GitHub</button> ' +
-      '<button class="icon-btn" onclick="App.testKvdb()" style="margin-bottom:10px;">🔧 kvdb.io leer</button> ' +
-      '<button class="icon-btn" onclick="App.testJsonblobCreate()" style="margin-bottom:10px;">🔧 jsonblob crear</button> ' +
-      '<button class="icon-btn" onclick="App.testHttpbinPost()" style="margin-bottom:10px;">🔧 POST genérico</button>';
-    if(syncId){
+    var ghToken = getGhToken();
+    if(!ghToken){
+      var tokenUrl = 'https://github.com/settings/tokens/new?scopes=gist&description=Itinerario%20de%20viaje';
+      html += '<div class="empty-hint" style="text-align:left; margin-bottom:10px;">Para sincronizar con tu pareja usamos tu cuenta de GitHub (la misma que ya usaste para publicar la app). Hace falta crear un token de acceso una sola vez, con permiso únicamente para "gist".<br><br>⚠️ Importante: ese permiso da acceso a todos tus "gists" (no solo a este itinerario). El código que vas a compartir después va a incluir ese token — cuidalo como una contraseña, no lo publiques en ningún lado.</div>' +
+        '<a class="btn primary full" style="text-decoration:none; display:flex; align-items:center; justify-content:center; margin-bottom:10px;" target="_blank" rel="noopener" href="'+tokenUrl+'">Crear token en GitHub</a>' +
+        '<div class="field"><label>Pegá el token acá</label><input id="gh-token-input" type="password" placeholder="ghp_..."></div>' +
+        '<button class="btn ghost full" onclick="App.saveGhToken()">Guardar token</button>';
+    } else if(syncId){
       html += '<div class="empty-hint" style="text-align:left; margin-bottom:10px;">Sincronización activa. '+renderSyncBadge()+'</div>' +
         '<div class="field"><label>Tu código (compartilo una sola vez)</label><input type="text" readonly value="'+esc(syncId)+'" onclick="this.select()"></div>' +
         '<div class="btn-row">' +
@@ -1276,48 +1315,12 @@
       showToast('Sincronización desactivada — sigue guardado en este dispositivo');
     },
     forceSync: function(){ showToast('Sincronizando…'); pollRemote().then(function(){ render(); }); },
-    testConnection: async function(){
-      showToast('Probando conexión…');
-      try{
-        var res = await fetch('https://api.github.com/zen');
-        if(!res.ok) throw new Error('HTTP '+res.status);
-        var text = await res.text();
-        showToast('✅ Funciona: "' + text.slice(0,40) + '"');
-      }catch(e){
-        showToast('❌ Falló incluso con GitHub: ' + ((e && e.message) ? e.message : String(e)));
-      }
-    },
-    testKvdb: async function(){
-      showToast('Probando kvdb.io…');
-      try{
-        var res = await fetch('https://kvdb.io/xxxxxNoExiste123456/test');
-        showToast('✅ kvdb.io responde: HTTP ' + res.status);
-      }catch(e){
-        showToast('❌ kvdb.io no responde: ' + ((e && e.message) ? e.message : String(e)));
-      }
-    },
-    testJsonblobCreate: async function(){
-      showToast('Probando creación en jsonblob…');
-      try{
-        var res = await fetch('https://jsonblob.com/api/jsonBlob', {
-          method: 'POST', body: JSON.stringify({test:1})
-        });
-        var loc = res.headers.get('Location') || res.headers.get('location');
-        showToast('✅ jsonblob responde: HTTP ' + res.status + (loc ? ' con id' : ' SIN id/Location'));
-      }catch(e){
-        showToast('❌ jsonblob create falló: ' + ((e && e.message) ? e.message : String(e)));
-      }
-    },
-    testHttpbinPost: async function(){
-      showToast('Probando POST genérico (httpbin)…');
-      try{
-        var res = await fetch('https://httpbin.org/post', {
-          method: 'POST', body: JSON.stringify({test:1})
-        });
-        showToast('✅ POST funciona en general: HTTP ' + res.status);
-      }catch(e){
-        showToast('❌ Ni httpbin funciona: ' + ((e && e.message) ? e.message : String(e)));
-      }
+    saveGhToken: function(){
+      var t = document.getElementById('gh-token-input').value.trim();
+      if(!t){ showToast('Pegá el token primero'); return; }
+      setGhToken(t);
+      render();
+      showToast('Token guardado');
     },
     shareSyncCode: async function(){
       var msg = 'Para ver nuestro itinerario de viaje, abrí la app y pegá este código de sincronización: ' + syncId;
