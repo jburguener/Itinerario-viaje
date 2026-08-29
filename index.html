@@ -1091,7 +1091,8 @@
     html += '<button class="btn ghost full" onclick="App.addCitySettings()">+ Agregar ciudad</button>';
 
     html += '<div class="section-label">Sincronización en pareja<div class="line"></div></div>';
-    html += '<button class="icon-btn" onclick="App.testConnection()" style="margin-bottom:10px;">🔧 Probar conexión (diagnóstico)</button>';
+    html += '<button class="icon-btn" onclick="App.testConnection()" style="margin-bottom:10px;">🔧 Probar conexión (GitHub)</button> ' +
+      '<button class="icon-btn" onclick="App.testKvdb()" style="margin-bottom:10px;">🔧 Probar kvdb.io</button>';
     if(syncId){
       html += '<div class="empty-hint" style="text-align:left; margin-bottom:10px;">Sincronización activa. '+renderSyncBadge()+'</div>' +
         '<div class="field"><label>Tu código (compartilo una sola vez)</label><input type="text" readonly value="'+esc(syncId)+'" onclick="this.select()"></div>' +
@@ -1282,6 +1283,15 @@
         showToast('✅ Funciona: "' + text.slice(0,40) + '"');
       }catch(e){
         showToast('❌ Falló incluso con GitHub: ' + ((e && e.message) ? e.message : String(e)));
+      }
+    },
+    testKvdb: async function(){
+      showToast('Probando kvdb.io…');
+      try{
+        var res = await fetch('https://kvdb.io/xxxxxNoExiste123456/test');
+        showToast('✅ kvdb.io responde: HTTP ' + res.status);
+      }catch(e){
+        showToast('❌ kvdb.io no responde: ' + ((e && e.message) ? e.message : String(e)));
       }
     },
     shareSyncCode: async function(){
