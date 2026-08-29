@@ -1091,8 +1091,9 @@
     html += '<button class="btn ghost full" onclick="App.addCitySettings()">+ Agregar ciudad</button>';
 
     html += '<div class="section-label">Sincronización en pareja<div class="line"></div></div>';
-    html += '<button class="icon-btn" onclick="App.testConnection()" style="margin-bottom:10px;">🔧 Probar conexión (GitHub)</button> ' +
-      '<button class="icon-btn" onclick="App.testKvdb()" style="margin-bottom:10px;">🔧 Probar kvdb.io</button>';
+    html += '<button class="icon-btn" onclick="App.testConnection()" style="margin-bottom:10px;">🔧 GitHub</button> ' +
+      '<button class="icon-btn" onclick="App.testKvdb()" style="margin-bottom:10px;">🔧 kvdb.io leer</button> ' +
+      '<button class="icon-btn" onclick="App.testJsonblobCreate()" style="margin-bottom:10px;">🔧 jsonblob crear</button>';
     if(syncId){
       html += '<div class="empty-hint" style="text-align:left; margin-bottom:10px;">Sincronización activa. '+renderSyncBadge()+'</div>' +
         '<div class="field"><label>Tu código (compartilo una sola vez)</label><input type="text" readonly value="'+esc(syncId)+'" onclick="this.select()"></div>' +
@@ -1292,6 +1293,18 @@
         showToast('✅ kvdb.io responde: HTTP ' + res.status);
       }catch(e){
         showToast('❌ kvdb.io no responde: ' + ((e && e.message) ? e.message : String(e)));
+      }
+    },
+    testJsonblobCreate: async function(){
+      showToast('Probando creación en jsonblob…');
+      try{
+        var res = await fetch('https://jsonblob.com/api/jsonBlob', {
+          method: 'POST', body: JSON.stringify({test:1})
+        });
+        var loc = res.headers.get('Location') || res.headers.get('location');
+        showToast('✅ jsonblob responde: HTTP ' + res.status + (loc ? ' con id' : ' SIN id/Location'));
+      }catch(e){
+        showToast('❌ jsonblob create falló: ' + ((e && e.message) ? e.message : String(e)));
       }
     },
     shareSyncCode: async function(){
