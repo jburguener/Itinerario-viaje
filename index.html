@@ -1019,7 +1019,7 @@
     return '<h3>'+(editing?'Editar':'Nueva')+' idea</h3>' +
       '<form onsubmit="App.saveIdea(event, \''+(editing?editing.id:'')+'\')">' +
         '<div class="field"><label>Ciudad</label><select id="i-city">'+cityOpts+'</select></div>' +
-        '<div class="field"><label>Lugar</label><input id="i-title" type="text" required autocomplete="off" placeholder="Escribí y elegí una sugerencia de Google" value="'+esc(editing?editing.title:'')+'"><div class="empty-hint" style="text-align:left; margin-top:4px; padding:6px 8px;" id="i-place-hint">'+(editing&&typeof editing.lat==='number' ? '📍 Ubicación exacta guardada' : 'Elegí una sugerencia de la lista para ubicarlo bien en el mapa')+'</div></div>' +
+        '<div class="field"><label>Lugar</label><input id="i-title" type="text" required autocomplete="off" placeholder="Escribí y elegí una sugerencia de Google" value="'+esc(editing?editing.title:'')+'"><div id="i-place-slot" style="margin-top:6px;"></div><div class="empty-hint" style="text-align:left; margin-top:4px; padding:6px 8px;" id="i-place-hint">'+(editing&&typeof editing.lat==='number' ? '📍 Ubicación exacta guardada' : 'Elegí una sugerencia de la lista para ubicarlo bien en el mapa')+'</div></div>' +
         '<div class="field"><label>Zona / barrio (opcional)</label><input id="i-zone" type="text" placeholder="Ej: Trastevere" value="'+esc(editing?editing.zone:'')+'"></div>' +
         '<input type="hidden" id="i-lat" value="'+(editing&&typeof editing.lat==='number'?editing.lat:'')+'">' +
         '<input type="hidden" id="i-lng" value="'+(editing&&typeof editing.lng==='number'?editing.lng:'')+'">' +
@@ -1214,28 +1214,33 @@
   async function attachPlaceAutocomplete(){
     var key = getGMapsKey();
     var input = document.getElementById('i-title');
-    if(!key || !input) return;
+    var slot = document.getElementById('i-place-slot');
+    if(!key || !input || !slot) return;
     try{
       await loadGoogleMaps(key);
-    }catch(e){ return; } // sin clave válida, el campo sigue funcionando como texto libre
-    if(!document.getElementById('i-title')) return; // el modal se cerró mientras cargaba
-    var ac = new google.maps.places.Autocomplete(input, {fields:['name','geometry']});
-    ac.addListener('place_changed', function(){
-      var place = ac.getPlace();
-      var latEl = document.getElementById('i-lat'), lngEl = document.getElementById('i-lng'), hint = document.getElementById('i-place-hint');
-      if(place && place.geometry && place.geometry.location){
-        if(latEl) latEl.value = place.geometry.location.lat();
-        if(lngEl) lngEl.value = place.geometry.location.lng();
-        if(hint) hint.textContent = '📍 Ubicación exacta guardada';
-      }
-    });
-    input.addEventListener('keydown', function(){
-      // si seguís escribiendo a mano después de elegir una sugerencia, invalidamos la ubicación guardada
-      var latEl = document.getElementById('i-lat'), lngEl = document.getElementById('i-lng'), hint = document.getElementById('i-place-hint');
-      if(latEl) latEl.value = '';
-      if(lngEl) lngEl.value = '';
-      if(hint) hint.textContent = 'Elegí una sugerencia de la lista para ubicarlo bien en el mapa';
-    });
+      var lib = await google.maps.importLibrary('places');
+      if(!lib || !lib.PlaceAutocompleteElement) return; // navegador/versión sin soporte, se queda el texto libre
+      if(!document.getElementById('i-place-slot')) return; // el modal se cerró mientras cargaba
+      var widget = new lib.PlaceAutocompleteElement({});
+      widget.style.width = '100%';
+      slot.innerHTML = '';
+      slot.appendChild(widget);
+      input.style.display = 'none';
+      widget.addEventListener('gmp-select', async function(ev){
+        try{
+          var place = ev.placePrediction.toPlace();
+          await place.fetchFields({fields:['displayName','location']});
+          var latEl = document.getElementById('i-lat'), lngEl = document.getElementById('i-lng'), hint = document.getElementById('i-place-hint');
+          var titleEl = document.getElementById('i-title');
+          if(titleEl) titleEl.value = place.displayName || titleEl.value;
+          if(place.location){
+            if(latEl) latEl.value = place.location.lat();
+            if(lngEl) lngEl.value = place.location.lng();
+          }
+          if(hint) hint.textContent = '📍 ' + (place.displayName||'') + ' — ubicación exacta guardada';
+        }catch(e){ /* si falla el detalle, el nombre elegido igual queda en el campo de búsqueda */ }
+      });
+    }catch(e){ /* sin clave válida o sin conexión — el campo sigue funcionando como texto libre */ }
   }
   var geocodeCache = {};
   function geocodeCacheKey(q){ return 'itin_geo_gm_v1_' + q.toLowerCase().trim(); }
