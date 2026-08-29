@@ -94,15 +94,33 @@
   .howto-steps b{ color: var(--amber); }
 
   /* ---------- tabs ---------- */
-  .tabs{ display:flex; gap: 4px; padding: 12px 16px 0; }
+  .tabs{ display:flex; gap: 4px; padding: 12px 16px 0; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+  .tabs::-webkit-scrollbar{ display:none; }
   .tab-btn{
-    flex: 1; background: none; border: none; color: var(--muted);
-    font-family: var(--mono); font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase;
-    padding: 10px 4px; cursor: pointer; border-bottom: 2px solid transparent;
+    flex: 0 0 auto; background: none; border: none; color: var(--muted);
+    font-family: var(--mono); font-size: 11px; letter-spacing: 0.3px; text-transform: uppercase;
+    padding: 10px 10px; cursor: pointer; border-bottom: 2px solid transparent; white-space: nowrap;
   }
   .tab-btn.active{ color: var(--amber); border-bottom-color: var(--amber); }
 
   main{ padding: 14px 16px 0; }
+
+  /* ---------- summary dashboard ---------- */
+  .summary-stats{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom: 18px; }
+  .stat-card{ flex:1 1 68px; background:var(--panel); border:1px solid var(--border-soft); border-radius:10px; padding:10px 6px; text-align:center; }
+  .stat-num{ font-family:var(--mono); font-size:19px; font-weight:700; color:var(--amber); }
+  .stat-label{ font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:3px; line-height:1.3; }
+  .summary-day-row{
+    display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border-soft);
+    border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:pointer;
+  }
+  .summary-day-row:active{ background: var(--panel-alt); }
+  .summary-day-date{ font-family:var(--mono); font-size:12px; color:var(--text); width:58px; flex-shrink:0; line-height:1.3; }
+  .summary-day-date .n{ font-weight:700; font-size:14px; }
+  .summary-day-main{ flex:1; min-width:0; }
+  .summary-day-city{ font-size:13px; font-weight:600; }
+  .summary-day-badges{ display:flex; gap:8px; font-size:11px; color:var(--muted); flex-wrap:wrap; margin-top:3px; }
+  .summary-today{ border-color: var(--amber); }
 
   /* ---------- day strip (boarding-pass stubs) ---------- */
   .day-strip{
@@ -642,7 +660,7 @@
     ensureSelectedDay();
     var html = renderHeader();
     html += renderTabs();
-    var body = ui.activeTab==='agenda' ? renderAgenda() : (ui.activeTab==='traslados' ? renderTransfersTab() : (ui.activeTab==='noches' ? renderStaysTab() : renderIdeasBank()));
+    var body = ui.activeTab==='resumen' ? renderSummaryTab() : (ui.activeTab==='agenda' ? renderAgenda() : (ui.activeTab==='traslados' ? renderTransfersTab() : (ui.activeTab==='noches' ? renderStaysTab() : renderIdeasBank())));
     html += '<main>' + body + '</main>';
     if(ui.modal){ html += renderModal(); }
     root.innerHTML = html;
@@ -681,11 +699,54 @@
 
   function renderTabs(){
     return '<div class="tabs">' +
+      '<button class="tab-btn'+(ui.activeTab==='resumen'?' active':'')+'" onclick="App.setTab(\'resumen\')">Resumen</button>' +
       '<button class="tab-btn'+(ui.activeTab==='agenda'?' active':'')+'" onclick="App.setTab(\'agenda\')">Agenda</button>' +
       '<button class="tab-btn'+(ui.activeTab==='traslados'?' active':'')+'" onclick="App.setTab(\'traslados\')">Traslados</button>' +
       '<button class="tab-btn'+(ui.activeTab==='noches'?' active':'')+'" onclick="App.setTab(\'noches\')">Noches</button>' +
       '<button class="tab-btn'+(ui.activeTab==='ideas'?' active':'')+'" onclick="App.setTab(\'ideas\')">Ideas</button>' +
     '</div>';
+  }
+
+  function renderSummaryTab(){
+    var days = allDays();
+    if(days.length === 0){
+      return '<div class="empty-hint">Agregá ciudades con fechas para ver el resumen del viaje.</div>';
+    }
+    var pendingIdeas = (state.ideas||[]).filter(function(i){ return !i.assignedDate; }).length;
+    var html = '<div class="summary-stats">' +
+      statCard(days.length, days.length===1?'Día':'Días') +
+      statCard(state.cities.length, state.cities.length===1?'Ciudad':'Ciudades') +
+      statCard((state.transfers||[]).length, 'Traslados') +
+      statCard((state.stays||[]).length, 'Alojam.') +
+      statCard(pendingIdeas, 'Ideas s/asignar') +
+    '</div>';
+
+    html += '<div class="section-label">Día a día — tocá uno para abrirlo<div class="line"></div></div>';
+    var t = todayISO();
+    days.forEach(function(d, idx){
+      var fixedCount = d.cityId ? fixedForDay(d.cityId, d.date).length : 0;
+      var ideaCount = d.cityId ? ideasAssignedForDay(d.cityId, d.date).length : 0;
+      var hasTransfer = transfersForDate(d.date).length > 0;
+      var hasStay = staysForDate(d.date).length > 0;
+      var isToday = d.date === t;
+      var badges = [];
+      if(fixedCount) badges.push('🎫 '+fixedCount);
+      if(ideaCount) badges.push('💡 '+ideaCount);
+      if(hasTransfer) badges.push('✈️');
+      if(hasStay) badges.push('🏨');
+      if(badges.length === 0) badges.push('Sin plan cargado');
+      html += '<div class="summary-day-row'+(isToday?' summary-today':'')+'" onclick="App.goToDaySummary(\''+d.date+'\')">' +
+        '<div class="summary-day-date">'+dowLabel(d.date)+' <span class="n">'+String(dayNum(d.date)).padStart(2,'0')+'</span> '+monLabel(d.date)+(isToday?' · HOY':'')+'</div>' +
+        '<div class="summary-day-main">' +
+          '<div class="summary-day-city">'+(d.cityName?esc(d.cityName):'En tránsito')+'</div>' +
+          '<div class="summary-day-badges">'+badges.join(' · ')+'</div>' +
+        '</div>' +
+      '</div>';
+    });
+    return html;
+  }
+  function statCard(num, label){
+    return '<div class="stat-card"><div class="stat-num">'+num+'</div><div class="stat-label">'+esc(label)+'</div></div>';
   }
 
   function renderAgenda(){
@@ -910,6 +971,7 @@
              ((idx>0 ? '<button class="icon-btn" onclick="App.moveIdea(\''+i.id+'\',-1)">↑</button>' : '') +
               (idx<total-1 ? '<button class="icon-btn" onclick="App.moveIdea(\''+i.id+'\',1)">↓</button>' : ''))
              : '') +
+           '<a class="icon-btn" style="text-decoration:none;" target="_blank" rel="noopener" href="'+ideaDirectionsUrl(i, city)+'">🧭 Cómo llegar</a>' +
            '<select class="assign-select" onchange="App.assignIdea(\''+i.id+'\', this.value)">'+dateOptions+'</select>' +
            '<button class="icon-btn" onclick="App.openIdeaForm(\''+i.id+'\')">Editar</button>' +
            '<button class="icon-btn danger" onclick="App.askDelete(\''+i.id+'\')">Borrar</button>')
@@ -1227,6 +1289,12 @@
   function buildGmapsUrl(stops){
     return 'https://www.google.com/maps/dir/' + stops.map(function(s){ return encodeURIComponent(s.query); }).join('/');
   }
+  function ideaDirectionsUrl(i, city){
+    var dest = (typeof i.lat === 'number' && typeof i.lng === 'number')
+      ? (i.lat + ',' + i.lng)
+      : (i.title + (i.zone?(', '+i.zone):'') + ', ' + (city?city.name:''));
+    return 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(dest);
+  }
   async function attachPlaceAutocomplete(){
     var key = getGMapsKey();
     var input = document.getElementById('i-title');
@@ -1399,6 +1467,7 @@
   /* ==================== App actions ==================== */
   window.App = {
     setTab: function(t){ ui.activeTab = t; ui.pendingDelete=null; render(); },
+    goToDaySummary: function(date){ ui.activeTab = 'agenda'; ui.selectedDate = date; ui.pendingDelete=null; ui.expandedNearby=false; render(); },
     selectDay: function(date){ ui.selectedDate = date; ui.pendingDelete=null; ui.expandedNearby=false; render(); },
     toggleNearby: function(){ ui.expandedNearby = !ui.expandedNearby; render(); },
     toggleOnboardRestore: function(){ ui.showOnboardRestore = !ui.showOnboardRestore; render(); },
