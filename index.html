@@ -366,7 +366,8 @@
   }
   var LOCAL_OK = (typeof window.localStorage !== 'undefined') && testLocalStorage();
   var SYNC_ID_KEY = 'itinerario_sync_id_v1';
-  var SYNC_ENDPOINT = 'https://jsonblob.com/api/jsonBlob';
+  var SYNC_BASE = 'https://kvdb.io';
+  var SYNC_KEY_NAME = 'itinerary';
   var POLL_MS = 17000;
 
   var syncId = null;
@@ -393,23 +394,30 @@
     try{ var raw = window.localStorage.getItem(LS_KEY); return raw ? JSON.parse(raw) : null; }catch(e){ return null; }
   }
 
+  // Nota técnica: usamos KVdb.io porque está pensado explícitamente para
+  // llamarse desde JavaScript de navegador (a diferencia de otras opciones
+  // que probamos). Evitamos poner Content-Type: application/json a propósito
+  // — así el pedido queda como "simple request" y no dispara un preflight
+  // CORS que muchos servicios gratuitos no manejan bien.
   async function remoteGet(id){
-    var res = await fetch(SYNC_ENDPOINT + '/' + id, {method:'GET', headers:{'Accept':'application/json'}});
+    var res = await fetch(SYNC_BASE + '/' + id + '/' + SYNC_KEY_NAME);
+    if(res.status === 404) throw new Error('código no encontrado (404)');
     if(!res.ok) throw new Error('HTTP '+res.status);
-    return await res.json();
+    var text = await res.text();
+    if(!text) throw new Error('sin datos guardados todavía');
+    return JSON.parse(text);
   }
   async function remoteCreate(data){
-    var res = await fetch(SYNC_ENDPOINT, {
-      method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
-    });
-    if(!res.ok) throw new Error('HTTP '+res.status);
-    var loc = res.headers.get('Location') || res.headers.get('location');
-    if(!loc) throw new Error('sin id de respuesta');
-    return loc.split('/').pop();
+    var bres = await fetch(SYNC_BASE + '/', { method:'POST', body: 'email=itinerario-app@example.com' });
+    if(!bres.ok) throw new Error('HTTP '+bres.status+' creando el código');
+    var id = (await bres.text()).trim();
+    if(!id) throw new Error('el servicio no devolvió un código');
+    await remotePut(id, data);
+    return id;
   }
   async function remotePut(id, data){
-    var res = await fetch(SYNC_ENDPOINT + '/' + id, {
-      method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify(data)
+    var res = await fetch(SYNC_BASE + '/' + id + '/' + SYNC_KEY_NAME, {
+      method: 'POST', body: JSON.stringify(data)
     });
     if(!res.ok) throw new Error('HTTP '+res.status);
   }
@@ -514,7 +522,7 @@
     t.id = 'toast'; t.className='toast'; t.textContent = msg;
     document.body.appendChild(t);
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function(){ t.remove(); }, 2200);
+    toastTimer = setTimeout(function(){ t.remove(); }, 4500);
   }
 
   /* ==================== derived data ==================== */
@@ -1083,6 +1091,7 @@
     html += '<button class="btn ghost full" onclick="App.addCitySettings()">+ Agregar ciudad</button>';
 
     html += '<div class="section-label">Sincronización en pareja<div class="line"></div></div>';
+    html += '<button class="icon-btn" onclick="App.testConnection()" style="margin-bottom:10px;">🔧 Probar conexión (diagnóstico)</button>';
     if(syncId){
       html += '<div class="empty-hint" style="text-align:left; margin-bottom:10px;">Sincronización activa. '+renderSyncBadge()+'</div>' +
         '<div class="field"><label>Tu código (compartilo una sola vez)</label><input type="text" readonly value="'+esc(syncId)+'" onclick="this.select()"></div>' +
@@ -1252,7 +1261,8 @@
         render();
         showToast('¡Sincronizado con tu pareja!');
       }catch(e){
-        showToast('No se encontró ese código. Revisalo e intentá de nuevo.');
+        console.error('Error uniéndose a la sincronización:', e);
+        showToast('No se encontró ese código (' + ((e && e.message) ? e.message : String(e)) + ')');
       }
     },
     stopSync: function(){
@@ -1263,6 +1273,17 @@
       showToast('Sincronización desactivada — sigue guardado en este dispositivo');
     },
     forceSync: function(){ showToast('Sincronizando…'); pollRemote().then(function(){ render(); }); },
+    testConnection: async function(){
+      showToast('Probando conexión…');
+      try{
+        var res = await fetch('https://api.github.com/zen');
+        if(!res.ok) throw new Error('HTTP '+res.status);
+        var text = await res.text();
+        showToast('✅ Funciona: "' + text.slice(0,40) + '"');
+      }catch(e){
+        showToast('❌ Falló incluso con GitHub: ' + ((e && e.message) ? e.message : String(e)));
+      }
+    },
     shareSyncCode: async function(){
       var msg = 'Para ver nuestro itinerario de viaje, abrí la app y pegá este código de sincronización: ' + syncId;
       if(navigator.share){
