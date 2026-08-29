@@ -8,8 +8,6 @@
 <meta name="theme-color" content="#12151a">
 <link rel="apple-touch-icon" href="icon-180.png">
 <link rel="icon" href="icon-192.png">
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <style>
   :root{
     --bg: #12151a;
@@ -1159,6 +1157,17 @@
     });
     html += '<button class="btn ghost full" onclick="App.addCitySettings()">+ Agregar ciudad</button>';
 
+    html += '<div class="section-label">Mapa (Google Maps)<div class="line"></div></div>';
+    var gKey = getGMapsKey();
+    if(gKey){
+      html += '<div class="empty-hint" style="text-align:left; margin-bottom:10px;">Clave conectada. El mapa del día ya debería mostrarse en la Agenda.</div>' +
+        '<button class="icon-btn danger" onclick="App.clearGMapsKey()">Quitar clave</button>';
+    } else {
+      html += '<div class="empty-hint" style="text-align:left; margin-bottom:10px;">Pegá acá la clave de Google Maps que generaste en Google Cloud Console.</div>' +
+        '<div class="field"><label>Clave de Google Maps</label><input id="gmaps-key-input" type="text" placeholder="AIza..."></div>' +
+        '<button class="btn primary full" onclick="App.saveGMapsKey()">Guardar clave</button>';
+    }
+
     html += '<div class="section-label">Sincronización en pareja<div class="line"></div></div>';
     var ghToken = getGhToken();
     if(!ghToken){
@@ -1195,46 +1204,74 @@
     return html;
   }
 
-  /* ==================== map ==================== */
-  var geocodeMemCache = {};
-  var currentLeafletMap = null;
-
-  function geoCacheKey(q){ return 'itin_geo_v1_' + q.toLowerCase().trim(); }
+  /* ==================== map (Google Maps) ==================== */
+  var GMAPS_KEY_STORAGE = 'itinerario_gmaps_key_v1';
+  function getGMapsKey(){
+    if(!LOCAL_OK) return null;
+    try{ return window.localStorage.getItem(GMAPS_KEY_STORAGE) || null; }catch(e){ return null; }
+  }
+  function setGMapsKey(k){
+    if(!LOCAL_OK) return;
+    try{ if(k) window.localStorage.setItem(GMAPS_KEY_STORAGE, k); else window.localStorage.removeItem(GMAPS_KEY_STORAGE); }catch(e){}
+  }
+  var gmapsLoadPromise = null;
+  function loadGoogleMaps(key){
+    if(window.google && window.google.maps) return Promise.resolve();
+    if(gmapsLoadPromise) return gmapsLoadPromise;
+    gmapsLoadPromise = new Promise(function(resolve, reject){
+      var cbName = '__itinGmapsInit';
+      window[cbName] = function(){ resolve(); };
+      var script = document.createElement('script');
+      script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) + '&callback=' + cbName;
+      script.async = true;
+      script.onerror = function(){ gmapsLoadPromise = null; reject(new Error('no se pudo cargar Google Maps — revisá la clave')); };
+      document.head.appendChild(script);
+    });
+    return gmapsLoadPromise;
+  }
+  function buildGmapsUrl(stops){
+    return 'https://www.google.com/maps/dir/' + stops.map(function(s){ return encodeURIComponent(s.query); }).join('/');
+  }
+  var geocodeCache = {};
+  function geocodeCacheKey(q){ return 'itin_geo_gm_v1_' + q.toLowerCase().trim(); }
   function getCachedGeocode(q){
-    if(geocodeMemCache.hasOwnProperty(q)) return geocodeMemCache[q];
+    if(geocodeCache.hasOwnProperty(q)) return geocodeCache[q];
     if(LOCAL_OK){
       try{
-        var raw = window.localStorage.getItem(geoCacheKey(q));
-        if(raw !== null){ var v = JSON.parse(raw); geocodeMemCache[q] = v; return v; }
+        var raw = window.localStorage.getItem(geocodeCacheKey(q));
+        if(raw !== null){ var v = JSON.parse(raw); geocodeCache[q] = v; return v; }
       }catch(e){}
     }
     return undefined;
   }
   function setCachedGeocode(q, val){
-    geocodeMemCache[q] = val;
-    if(LOCAL_OK){ try{ window.localStorage.setItem(geoCacheKey(q), JSON.stringify(val)); }catch(e){} }
+    geocodeCache[q] = val;
+    if(LOCAL_OK){ try{ window.localStorage.setItem(geocodeCacheKey(q), JSON.stringify(val)); }catch(e){} }
   }
-  function sleep(ms){ return new Promise(function(res){ setTimeout(res, ms); }); }
-  async function geocode(query){
+  function geocodeOne(geocoder, query){
     var cached = getCachedGeocode(query);
-    if(cached !== undefined) return cached;
-    try{
-      var url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(query);
-      var res = await fetch(url, {headers:{'Accept':'application/json'}});
-      var data = await res.json();
-      var val = (data && data[0]) ? {lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon)} : null;
-      setCachedGeocode(query, val);
-      return val;
-    }catch(e){ return null; }
+    if(cached !== undefined) return Promise.resolve(cached);
+    return new Promise(function(resolve){
+      geocoder.geocode({address: query}, function(results, status){
+        if(status === 'OK' && results && results[0]){
+          var loc = results[0].geometry.location;
+          var val = {lat: loc.lat(), lng: loc.lng()};
+          setCachedGeocode(query, val);
+          resolve(val);
+        } else {
+          setCachedGeocode(query, null);
+          resolve(null);
+        }
+      });
+    });
   }
-  function buildGmapsUrl(stops){
-    return 'https://www.google.com/maps/dir/' + stops.map(function(s){ return encodeURIComponent(s.query); }).join('/');
-  }
+  var currentGMap = null;
   async function mountDayMap(date){
     var container = document.getElementById('daymap-container');
     if(!container) return;
-    if(typeof L === 'undefined'){
-      container.innerHTML = '<div class="empty-hint">Sin conexión — el mapa necesita internet para cargar.</div>';
+    var key = getGMapsKey();
+    if(!key){
+      container.innerHTML = '<div class="empty-hint">Conectá tu clave de Google Maps en ⚙ Editar viaje para ver el mapa acá.</div>';
       return;
     }
     var selInfo = allDays().find(function(d){ return d.date===date; });
@@ -1250,40 +1287,51 @@
       return;
     }
     container.innerHTML = '<div class="empty-hint">Cargando mapa del día…</div>';
+    try{
+      await loadGoogleMaps(key);
+    }catch(e){
+      container.innerHTML = '<div class="empty-hint">'+esc(e.message)+'</div>';
+      return;
+    }
+    if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
+    var geocoder = new google.maps.Geocoder();
     var points = [];
     for(var i=0; i<stops.length; i++){
-      if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return; // el usuario cambió de pantalla mientras cargaba
-      var g = await geocode(stops[i].query);
-      if(g) points.push({lat:g.lat, lon:g.lon, label: stops[i].label, n: points.length+1});
-      if(i < stops.length-1) await sleep(1100);
+      if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
+      var g = await geocodeOne(geocoder, stops[i].query);
+      if(g) points.push({lat:g.lat, lng:g.lng, label: stops[i].label, n: points.length+1});
     }
     if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
     container = document.getElementById('daymap-container');
     if(!container) return;
     if(points.length === 0){
-      container.innerHTML = '<div class="empty-hint">No pudimos ubicar esas direcciones en el mapa. Probá con nombres más específicos.</div>';
+      container.innerHTML = '<div class="empty-hint">No pudimos ubicar esos lugares en el mapa. Probá con nombres más específicos.</div>';
       return;
     }
-    container.innerHTML = '<div id="leaflet-map" style="height:220px; border-radius:10px; overflow:hidden;"></div>' +
+    container.innerHTML = '<div id="gmap-canvas" style="height:220px; border-radius:10px; overflow:hidden;"></div>' +
       '<div class="btn-row" style="margin-top:8px;"><a class="btn violet full" style="text-decoration:none; display:flex; align-items:center; justify-content:center;" target="_blank" rel="noopener" href="'+buildGmapsUrl(stops)+'">🧭 Abrir ruta en Google Maps</a></div>';
-    if(currentLeafletMap){ try{ currentLeafletMap.remove(); }catch(e){} currentLeafletMap = null; }
-    var map = L.map('leaflet-map', {zoomControl:true});
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, attribution: '© OpenStreetMap'
-    }).addTo(map);
-    var latlngs = [];
-    points.forEach(function(p){
-      var icon = L.divIcon({className:'', html:'<div class="map-pin">'+p.n+'</div>', iconSize:[26,26], iconAnchor:[13,13]});
-      L.marker([p.lat,p.lon], {icon:icon}).addTo(map).bindPopup(esc(p.label));
-      latlngs.push([p.lat,p.lon]);
+    var map = new google.maps.Map(document.getElementById('gmap-canvas'), {
+      zoom: 13, center: points[0], disableDefaultUI: false, streetViewControl:false, mapTypeControl:false
     });
-    if(latlngs.length > 1){
-      L.polyline(latlngs, {color:'#b8a1f5', weight:3, dashArray:'6,6'}).addTo(map);
-      map.fitBounds(latlngs, {padding:[24,24]});
+    var bounds = new google.maps.LatLngBounds();
+    points.forEach(function(p){
+      var marker = new google.maps.Marker({
+        position: {lat:p.lat, lng:p.lng}, map: map, title: p.label,
+        label: {text:String(p.n), color:'#1a1305', fontWeight:'700', fontSize:'12px'},
+        icon: { path: google.maps.SymbolPath.CIRCLE, fillColor:'#b8a1f5', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, scale:14 }
+      });
+      bounds.extend(marker.getPosition());
+    });
+    if(points.length > 1){
+      new google.maps.Polyline({
+        path: points.map(function(p){ return {lat:p.lat, lng:p.lng}; }),
+        map: map, strokeColor:'#b8a1f5', strokeOpacity:0.8, strokeWeight:3
+      });
+      map.fitBounds(bounds, 32);
     } else {
-      map.setView(latlngs[0], 14);
+      map.setCenter(points[0]); map.setZoom(15);
     }
-    currentLeafletMap = map;
+    currentGMap = map;
   }
 
   /* ==================== App actions ==================== */
@@ -1488,6 +1536,18 @@
     deleteMapPlace: function(id){
       state.mapPlaces = (state.mapPlaces||[]).filter(function(p){return p.id!==id;});
       ui.pendingDelete = null; render(); persist('Lugar borrado');
+    },
+    saveGMapsKey: function(){
+      var k = document.getElementById('gmaps-key-input').value.trim();
+      if(!k){ showToast('Pegá la clave primero'); return; }
+      setGMapsKey(k);
+      render();
+      showToast('Clave guardada');
+    },
+    clearGMapsKey: function(){
+      setGMapsKey(null);
+      render();
+      showToast('Clave quitada');
     },
 
     saveTransfer: function(ev, id){
