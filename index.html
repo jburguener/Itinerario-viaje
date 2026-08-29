@@ -1232,7 +1232,8 @@
         render();
         showToast('¡Listo! Compartí el código con tu pareja.');
       }catch(e){
-        showToast('No se pudo activar la sincronización. Revisá tu conexión e intentá de nuevo.');
+        console.error('Error creando sincronización:', e);
+        showToast('Error: ' + ((e && e.message) ? e.message : String(e)));
       }
     },
     joinSync: async function(){
