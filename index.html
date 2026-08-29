@@ -1306,14 +1306,22 @@
       container.innerHTML = '<div class="empty-hint">Asigná ideas para hoy para ver el mapa de la ruta.</div>';
       return;
     }
-    var stops = assignedIdeas.map(function(i){
+    var ideaStops = assignedIdeas.map(function(i){
       return {
         label: i.title,
         query: i.title + (i.zone?(', '+i.zone):'') + ', ' + (city?city.name:''),
         lat: (typeof i.lat === 'number') ? i.lat : null,
-        lng: (typeof i.lng === 'number') ? i.lng : null
+        lng: (typeof i.lng === 'number') ? i.lng : null,
+        isHotel: false
       };
     });
+    var stayToday = staysForDate(date)[0];
+    var hotelStop = stayToday ? {
+      label: stayToday.name,
+      query: (stayToday.address && stayToday.address.trim() ? stayToday.address.trim() : stayToday.name) + ', ' + (city?city.name:''),
+      lat: null, lng: null, isHotel: true
+    } : null;
+    var stops = hotelStop ? [hotelStop].concat(ideaStops, [hotelStop]) : ideaStops;
     container.innerHTML = '<div class="empty-hint">Cargando mapa del día…</div>';
     try{
       await loadGoogleMaps(key);
@@ -1321,14 +1329,23 @@
 
       var geocoder = new google.maps.Geocoder();
       var points = [];
+      var ideaCount = 0;
       for(var i=0; i<stops.length; i++){
         if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
+        var pt = null;
         if(stops[i].lat !== null && stops[i].lng !== null){
-          points.push({lat: stops[i].lat, lng: stops[i].lng, label: stops[i].label, n: points.length+1});
-          continue;
+          pt = {lat: stops[i].lat, lng: stops[i].lng};
+        } else {
+          pt = await geocodeOne(geocoder, stops[i].query);
         }
-        var g = await geocodeOne(geocoder, stops[i].query);
-        if(g) points.push({lat:g.lat, lng:g.lng, label: stops[i].label, n: points.length+1});
+        if(pt){
+          if(stops[i].isHotel){
+            points.push({lat:pt.lat, lng:pt.lng, label: stops[i].label, isHotel:true});
+          } else {
+            ideaCount++;
+            points.push({lat:pt.lat, lng:pt.lng, label: stops[i].label, n: ideaCount});
+          }
+        }
       }
       if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
 
@@ -1347,8 +1364,8 @@
       points.forEach(function(p){
         var marker = new google.maps.Marker({
           position: {lat:p.lat, lng:p.lng}, map: map, title: p.label,
-          label: {text:String(p.n), color:'#1a1305', fontWeight:'700', fontSize:'12px'},
-          icon: { path: google.maps.SymbolPath.CIRCLE, fillColor:'#b8a1f5', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, scale:14 }
+          label: p.isHotel ? {text:'🏠', fontSize:'13px'} : {text:String(p.n), color:'#1a1305', fontWeight:'700', fontSize:'12px'},
+          icon: { path: google.maps.SymbolPath.CIRCLE, fillColor: p.isHotel ? '#7ec8e3' : '#b8a1f5', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, scale:14 }
         });
         bounds.extend(marker.getPosition());
       });
