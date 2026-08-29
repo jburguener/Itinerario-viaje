@@ -1240,7 +1240,11 @@
           if(hint) hint.textContent = '📍 ' + (place.displayName||'') + ' — ubicación exacta guardada';
         }catch(e){ /* si falla el detalle, el nombre elegido igual queda en el campo de búsqueda */ }
       });
-    }catch(e){ /* sin clave válida o sin conexión — el campo sigue funcionando como texto libre */ }
+    }catch(e){
+      console.error('Error activando el buscador de lugares:', e);
+      var hint = document.getElementById('i-place-hint');
+      if(hint) hint.textContent = '⚠️ ' + ((e && e.message) ? e.message : String(e));
+    }
   }
   var geocodeCache = {};
   function geocodeCacheKey(q){ return 'itin_geo_gm_v1_' + q.toLowerCase().trim(); }
