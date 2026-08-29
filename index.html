@@ -598,6 +598,9 @@
   function allStaysSorted(){
     return (state.stays||[]).slice().sort(function(a,b){ return (a.checkIn||'').localeCompare(b.checkIn||''); });
   }
+  function placesForDate(date){
+    return (state.mapPlaces||[]).filter(function(p){ return p.date === date; });
+  }
   function fixedForDay(cityId, date){
     return (state.fixedEvents||[]).filter(function(e){ return e.cityId===cityId && e.date===date; })
       .sort(function(a,b){
@@ -740,7 +743,7 @@
     if(assigned.length === 0){
       html += '<div class="empty-hint">No asignaste ideas flexibles a este día.</div>';
     } else {
-      html += '<div class="empty-hint" style="margin-bottom:8px; padding:8px;">Usá ↑↓ para ordenarlas — ese orden es el que se usa en el mapa de abajo.</div>';
+      html += '<div class="empty-hint" style="margin-bottom:8px; padding:8px;">Usá ↑↓ para reordenarlas.</div>';
       assigned.forEach(function(i, idx){ html += renderIdeaRow(i, true, null, idx, assigned.length); });
     }
 
@@ -760,10 +763,40 @@
       }
     }
 
-    html += '<div class="section-label">Mapa del día<div class="line"></div></div>' +
-      '<div id="daymap-container"><div class="empty-hint">Cargando mapa…</div></div>';
+    html += '<div class="section-label">Mapa del día<div class="line"></div></div>';
+    var places = placesForDate(selDate);
+    if(places.length === 0){
+      html += '<div class="empty-hint">Todavía no agregaste lugares para hoy.</div>';
+    } else {
+      places.forEach(function(p, idx){ html += renderPlaceRow(p, idx, places.length); });
+    }
+    html += '<form class="btn-row" style="margin-top:4px;" onsubmit="App.addMapPlace(event, \''+selDate+'\')">' +
+        '<input id="place-input-'+selDate+'" type="text" placeholder="Ej: Coliseo" style="flex:1; min-width:0; background:var(--panel-alt); border:1px solid var(--border); color:var(--text); border-radius:8px; padding:10px;">' +
+        '<button type="submit" class="btn primary" style="flex:none;">+ Agregar</button>' +
+      '</form>' +
+      '<div id="daymap-container" style="margin-top:12px;"><div class="empty-hint">Cargando mapa…</div></div>';
 
     return html;
+  }
+
+  function renderPlaceRow(p, idx, total){
+    var confirmMode = ui.pendingDelete === p.id;
+    return '<div class="idea-row">' +
+      '<div class="idea-body" style="display:flex; align-items:center; gap:10px;">' +
+        '<div class="map-pin" style="flex-shrink:0;">'+(idx+1)+'</div>' +
+        '<div class="idea-title">'+esc(p.name)+'</div>' +
+      '</div>' +
+      '<div class="row-actions">' +
+        (confirmMode ?
+          ('<button class="icon-btn confirm" onclick="App.deleteMapPlace(\''+p.id+'\')">Sí, borrar</button>' +
+           '<button class="icon-btn" onclick="App.cancelDelete()">Cancelar</button>')
+          :
+          ((idx>0 ? '<button class="icon-btn" onclick="App.moveMapPlace(\''+p.id+'\',-1)">↑</button>' : '') +
+           (idx<total-1 ? '<button class="icon-btn" onclick="App.moveMapPlace(\''+p.id+'\',1)">↓</button>' : '') +
+           '<button class="icon-btn danger" onclick="App.askDelete(\''+p.id+'\')">Borrar</button>')
+        ) +
+      '</div>' +
+    '</div>';
   }
 
   function renderTransferRow(t){
@@ -1210,17 +1243,10 @@
       return;
     }
     var city = cityById(selInfo.cityId);
-    var stops = [];
-    fixedForDay(selInfo.cityId, date).forEach(function(e){
-      if(e.location && e.location.trim()){
-        stops.push({label: e.title, query: e.location.trim() + ', ' + (city?city.name:'')});
-      }
-    });
-    ideasAssignedForDay(selInfo.cityId, date).forEach(function(i){
-      stops.push({label: i.title, query: i.title + (i.zone?(', '+i.zone):'') + ', ' + (city?city.name:'')});
-    });
+    var places = placesForDate(date);
+    var stops = places.map(function(p){ return {label: p.name, query: p.name + ', ' + (city?city.name:'')}; });
     if(stops.length === 0){
-      container.innerHTML = '<div class="empty-hint">Agregá una ubicación a tus eventos, o ideas para hoy, para ver el mapa de la ruta.</div>';
+      container.innerHTML = '<div class="empty-hint">Agregá lugares arriba para ver el mapa de la ruta.</div>';
       return;
     }
     container.innerHTML = '<div class="empty-hint">Cargando mapa del día…</div>';
@@ -1438,6 +1464,31 @@
       state.ideas[ai] = other; state.ideas[bi] = idea;
       render(); persist('Orden actualizado');
     },
+    addMapPlace: function(ev, date){
+      ev.preventDefault();
+      var input = document.getElementById('place-input-'+date);
+      var name = input.value.trim();
+      if(!name) return;
+      state.mapPlaces = state.mapPlaces || [];
+      state.mapPlaces.push({id: uid(), date: date, name: name});
+      render(); persist('Lugar agregado');
+    },
+    moveMapPlace: function(id, dir){
+      var place = (state.mapPlaces||[]).find(function(x){return x.id===id;});
+      if(!place) return;
+      var group = placesForDate(place.date);
+      var idx = group.findIndex(function(x){return x.id===id;});
+      var swapIdx = idx + dir;
+      if(swapIdx < 0 || swapIdx >= group.length) return;
+      var other = group[swapIdx];
+      var ai = state.mapPlaces.indexOf(place), bi = state.mapPlaces.indexOf(other);
+      state.mapPlaces[ai] = other; state.mapPlaces[bi] = place;
+      render(); persist('Orden actualizado');
+    },
+    deleteMapPlace: function(id){
+      state.mapPlaces = (state.mapPlaces||[]).filter(function(p){return p.id!==id;});
+      ui.pendingDelete = null; render(); persist('Lugar borrado');
+    },
 
     saveTransfer: function(ev, id){
       ev.preventDefault();
@@ -1523,6 +1574,7 @@
       parsed.ideas = parsed.ideas || [];
       parsed.transfers = parsed.transfers || [];
       parsed.stays = parsed.stays || [];
+      parsed.mapPlaces = parsed.mapPlaces || [];
       state = parsed;
       ui.modal = null; ui.selectedDate = null; ui.pendingDelete = null;
       render(); persist('Itinerario restaurado');
@@ -1549,7 +1601,8 @@
         fixedEvents: [],
         ideas: [],
         transfers: [],
-        stays: []
+        stays: [],
+        mapPlaces: []
       };
       onboardCities = null; onboardTripName = '';
       render(); persist('¡Itinerario creado!');
