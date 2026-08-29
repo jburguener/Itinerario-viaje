@@ -24,6 +24,8 @@
     --violet-dim: #5e5085;
     --sleep: #7ec8e3;
     --sleep-dim: #3d6c80;
+    --food: #ff8a65;
+    --food-dim: #8a4a35;
     --text: #edeef0;
     --muted: #8a93a3;
     --muted-2: #5f6878;
@@ -152,12 +154,12 @@
 
   /* ---------- fixed event row ---------- */
   .event-row{
-    display:flex; gap: 12px; background: var(--panel); border: 1px solid var(--border-soft);
+    display:flex; flex-wrap: wrap; gap: 8px 12px; background: var(--panel); border: 1px solid var(--border-soft);
     border-left: 3px solid var(--amber); border-radius: 8px; padding: 11px 12px; margin-bottom: 8px;
   }
   .event-time{ font-family: var(--mono); font-size: 13px; font-weight: 700; color: var(--amber); width: 46px; flex-shrink:0; padding-top: 1px; }
   .event-time.notime{ color: var(--muted-2); font-size: 11px; }
-  .event-body{ flex:1; min-width: 0; }
+  .event-body{ flex: 1 1 150px; min-width: 150px; }
   .event-title{ font-size: 14px; font-weight: 600; }
   .event-sub{ font-size: 12px; color: var(--muted); margin-top: 2px; }
   .event-notes{ font-size: 12px; color: var(--muted-2); margin-top: 4px; white-space: pre-wrap; }
@@ -165,23 +167,25 @@
 
   /* ---------- idea row ---------- */
   .idea-row{
-    display:flex; gap: 12px; background: var(--panel); border: 1px solid var(--border-soft);
+    display:flex; flex-wrap: wrap; gap: 8px 12px; background: var(--panel); border: 1px solid var(--border-soft);
     border-left: 3px dashed var(--teal); border-radius: 8px; padding: 11px 12px; margin-bottom: 8px;
     align-items: flex-start;
   }
-  .idea-body{ flex:1; min-width:0; }
+  .idea-body{ flex: 1 1 150px; min-width: 150px; }
   .idea-title{ font-size: 14px; font-weight: 600; }
   .idea-zone{ font-family: var(--mono); font-size: 10px; color: var(--teal); text-transform: uppercase; letter-spacing: .5px; }
   .idea-notes{ font-size: 12px; color: var(--muted-2); margin-top: 4px; white-space: pre-wrap; }
   .idea-cat{ display:inline-block; font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: var(--teal-dim); border: 1px solid var(--teal-dim); border-radius: 4px; padding: 1px 5px; margin-top: 5px; }
+  .idea-row.food{ border-left-color: var(--food); }
+  .idea-cat.food-cat{ color: var(--food); border-color: var(--food-dim); }
 
   /* ---------- transfer row ---------- */
   .transfer-row{
-    display:flex; gap: 12px; background: var(--panel); border: 1px solid var(--border-soft);
+    display:flex; flex-wrap: wrap; gap: 8px 12px; background: var(--panel); border: 1px solid var(--border-soft);
     border-left: 3px solid var(--violet); border-radius: 8px; padding: 11px 12px; margin-bottom: 8px;
   }
   .transfer-icon{ font-size: 18px; width: 30px; flex-shrink:0; text-align:center; padding-top: 2px; }
-  .transfer-body{ flex:1; min-width:0; }
+  .transfer-body{ flex: 1 1 150px; min-width: 150px; }
   .transfer-route{ font-size: 14px; font-weight: 600; }
   .transfer-route .arrow{ color: var(--violet); margin: 0 4px; }
   .transfer-times{ font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -191,11 +195,11 @@
 
   /* ---------- stay row ---------- */
   .stay-row{
-    display:flex; gap: 12px; background: var(--panel); border: 1px solid var(--border-soft);
+    display:flex; flex-wrap: wrap; gap: 8px 12px; background: var(--panel); border: 1px solid var(--border-soft);
     border-left: 3px solid var(--sleep); border-radius: 8px; padding: 11px 12px; margin-bottom: 8px;
   }
   .stay-icon{ font-size: 18px; width: 30px; flex-shrink:0; text-align:center; padding-top: 2px; }
-  .stay-body{ flex:1; min-width:0; }
+  .stay-body{ flex: 1 1 150px; min-width: 150px; }
   .stay-title{ font-size: 14px; font-weight: 600; }
   .stay-dates{ font-family: var(--mono); font-size: 12px; color: var(--muted); margin-top: 2px; }
   .stay-notes{ font-size: 12px; color: var(--muted-2); margin-top: 4px; white-space: pre-wrap; }
@@ -206,10 +210,10 @@
   .map-pin{
     background: var(--violet); color:#1a1305; width:26px; height:26px; border-radius:50%;
     display:flex; align-items:center; justify-content:center; font-family:var(--mono); font-weight:700; font-size:12px;
-    border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,.4);
+    border:2px solid #fff; box-shadow:0 2px 6px rgba(0,0,0,.4); flex-shrink:0;
   }
 
-  .row-actions{ display:flex; gap: 6px; flex-shrink:0; align-items:flex-start; flex-wrap: wrap; justify-content: flex-end; }
+  .row-actions{ display:flex; gap: 6px; flex-shrink:0; align-items:flex-start; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; }
   .icon-btn{
     background: var(--panel-alt); border: 1px solid var(--border); color: var(--muted);
     font-size: 12px; padding: 5px 8px; border-radius: 6px; cursor:pointer; font-family: var(--sans);
@@ -876,14 +880,15 @@
         dateOptions += '<option value="'+d+'"'+(i.assignedDate===d?' selected':'')+'>'+fullLabel(d)+'</option>';
       });
     }
-    return '<div class="idea-row">' +
+    var isFood = i.category === 'Comida';
+    return '<div class="idea-row'+(isFood?' food':'')+'">' +
       (assignedContext ? '<div class="map-pin" style="flex-shrink:0; align-self:flex-start;">'+(idx+1)+'</div>' : '') +
       '<div class="idea-body">' +
         '<div class="idea-zone">'+esc(i.zone||'Sin zona')+'</div>' +
         '<div class="idea-title">'+esc(i.title)+'</div>' +
         (i.duration ? '<div class="event-sub">⏱ '+esc(i.duration)+'</div>' : '') +
         (i.notes ? '<div class="idea-notes">'+esc(i.notes)+'</div>' : '') +
-        (i.category ? '<div class="idea-cat">'+esc(i.category)+'</div>' : '') +
+        (i.category ? '<div class="idea-cat'+(isFood?' food-cat':'')+'">'+esc(i.category)+'</div>' : '') +
       '</div>' +
       '<div class="row-actions">' +
         (confirmMode ?
