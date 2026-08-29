@@ -636,6 +636,8 @@
   /* ==================== render ==================== */
   function render(){
     var root = document.getElementById('app');
+    var prevStrip = document.querySelector('.day-strip');
+    var savedScroll = prevStrip ? prevStrip.scrollLeft : null;
     if(!state){ root.innerHTML = renderOnboarding(); return; }
     ensureSelectedDay();
     var html = renderHeader();
@@ -646,6 +648,15 @@
     root.innerHTML = html;
     if(ui.activeTab === 'agenda' && ui.selectedDate){ mountDayMap(ui.selectedDate); }
     if(ui.modal && ui.modal.type === 'idea'){ attachPlaceAutocomplete(); }
+    var newStrip = document.querySelector('.day-strip');
+    if(newStrip){
+      if(savedScroll !== null){
+        newStrip.scrollLeft = savedScroll;
+      } else {
+        var sel = newStrip.querySelector('.day-stub.selected');
+        if(sel) sel.scrollIntoView({inline:'center', block:'nearest'});
+      }
+    }
   }
 
   function renderHeader(){
