@@ -641,6 +641,7 @@
     if(ui.modal){ html += renderModal(); }
     root.innerHTML = html;
     if(ui.activeTab === 'agenda' && ui.selectedDate){ mountDayMap(ui.selectedDate); }
+    if(ui.modal && ui.modal.type === 'idea'){ attachPlaceAutocomplete(); }
   }
 
   function renderHeader(){
@@ -1018,8 +1019,10 @@
     return '<h3>'+(editing?'Editar':'Nueva')+' idea</h3>' +
       '<form onsubmit="App.saveIdea(event, \''+(editing?editing.id:'')+'\')">' +
         '<div class="field"><label>Ciudad</label><select id="i-city">'+cityOpts+'</select></div>' +
-        '<div class="field"><label>Zona / barrio</label><input id="i-zone" type="text" placeholder="Ej: Trastevere" value="'+esc(editing?editing.zone:'')+'"></div>' +
-        '<div class="field"><label>Título</label><input id="i-title" type="text" required placeholder="Ej: Galería Borghese" value="'+esc(editing?editing.title:'')+'"></div>' +
+        '<div class="field"><label>Lugar</label><input id="i-title" type="text" required autocomplete="off" placeholder="Escribí y elegí una sugerencia de Google" value="'+esc(editing?editing.title:'')+'"><div class="empty-hint" style="text-align:left; margin-top:4px; padding:6px 8px;" id="i-place-hint">'+(editing&&typeof editing.lat==='number' ? '📍 Ubicación exacta guardada' : 'Elegí una sugerencia de la lista para ubicarlo bien en el mapa')+'</div></div>' +
+        '<div class="field"><label>Zona / barrio (opcional)</label><input id="i-zone" type="text" placeholder="Ej: Trastevere" value="'+esc(editing?editing.zone:'')+'"></div>' +
+        '<input type="hidden" id="i-lat" value="'+(editing&&typeof editing.lat==='number'?editing.lat:'')+'">' +
+        '<input type="hidden" id="i-lng" value="'+(editing&&typeof editing.lng==='number'?editing.lng:'')+'">' +
         '<div class="field-row">' +
           '<div class="field"><label>Duración aprox. (opcional)</label><input id="i-dur" type="text" placeholder="Ej: 2h" value="'+esc(editing?editing.duration:'')+'"></div>' +
           '<div class="field"><label>Categoría</label><select id="i-cat">'+catOpts+'</select></div>' +
@@ -1198,7 +1201,7 @@
       };
       window[cbName] = function(){ resolve(); };
       var script = document.createElement('script');
-      script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) + '&callback=' + cbName;
+      script.src = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(key) + '&libraries=places&callback=' + cbName;
       script.async = true;
       script.onerror = function(){ gmapsLoadPromise = null; reject(new Error('no se pudo cargar el script de Google Maps (revisá tu conexión)')); };
       document.head.appendChild(script);
@@ -1207,6 +1210,32 @@
   }
   function buildGmapsUrl(stops){
     return 'https://www.google.com/maps/dir/' + stops.map(function(s){ return encodeURIComponent(s.query); }).join('/');
+  }
+  async function attachPlaceAutocomplete(){
+    var key = getGMapsKey();
+    var input = document.getElementById('i-title');
+    if(!key || !input) return;
+    try{
+      await loadGoogleMaps(key);
+    }catch(e){ return; } // sin clave válida, el campo sigue funcionando como texto libre
+    if(!document.getElementById('i-title')) return; // el modal se cerró mientras cargaba
+    var ac = new google.maps.places.Autocomplete(input, {fields:['name','geometry']});
+    ac.addListener('place_changed', function(){
+      var place = ac.getPlace();
+      var latEl = document.getElementById('i-lat'), lngEl = document.getElementById('i-lng'), hint = document.getElementById('i-place-hint');
+      if(place && place.geometry && place.geometry.location){
+        if(latEl) latEl.value = place.geometry.location.lat();
+        if(lngEl) lngEl.value = place.geometry.location.lng();
+        if(hint) hint.textContent = '📍 Ubicación exacta guardada';
+      }
+    });
+    input.addEventListener('keydown', function(){
+      // si seguís escribiendo a mano después de elegir una sugerencia, invalidamos la ubicación guardada
+      var latEl = document.getElementById('i-lat'), lngEl = document.getElementById('i-lng'), hint = document.getElementById('i-place-hint');
+      if(latEl) latEl.value = '';
+      if(lngEl) lngEl.value = '';
+      if(hint) hint.textContent = 'Elegí una sugerencia de la lista para ubicarlo bien en el mapa';
+    });
   }
   var geocodeCache = {};
   function geocodeCacheKey(q){ return 'itin_geo_gm_v1_' + q.toLowerCase().trim(); }
@@ -1259,63 +1288,70 @@
     }
     var city = cityById(selInfo.cityId);
     var assignedIdeas = ideasAssignedForDay(selInfo.cityId, date);
-    var stops = assignedIdeas.map(function(i){ return {label: i.title, query: i.title + (i.zone?(', '+i.zone):'') + ', ' + (city?city.name:'')}; });
-    if(stops.length === 0){
+    if(assignedIdeas.length === 0){
       container.innerHTML = '<div class="empty-hint">Asigná ideas para hoy para ver el mapa de la ruta.</div>';
       return;
     }
+    var stops = assignedIdeas.map(function(i){
+      return {
+        label: i.title,
+        query: i.title + (i.zone?(', '+i.zone):'') + ', ' + (city?city.name:''),
+        lat: (typeof i.lat === 'number') ? i.lat : null,
+        lng: (typeof i.lng === 'number') ? i.lng : null
+      };
+    });
     container.innerHTML = '<div class="empty-hint">Cargando mapa del día…</div>';
     try{
       await loadGoogleMaps(key);
-    }catch(e){
-      container.innerHTML = '<div class="empty-hint">'+esc(e.message)+'</div>';
-      return;
-    }
-    if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
-    var geocoder = new google.maps.Geocoder();
-    var points = [];
-    try{
+      if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
+
+      var geocoder = new google.maps.Geocoder();
+      var points = [];
       for(var i=0; i<stops.length; i++){
         if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
+        if(stops[i].lat !== null && stops[i].lng !== null){
+          points.push({lat: stops[i].lat, lng: stops[i].lng, label: stops[i].label, n: points.length+1});
+          continue;
+        }
         var g = await geocodeOne(geocoder, stops[i].query);
         if(g) points.push({lat:g.lat, lng:g.lng, label: stops[i].label, n: points.length+1});
       }
-    }catch(e){
+      if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
+
       container = document.getElementById('daymap-container');
-      if(container) container.innerHTML = '<div class="empty-hint">Error de Google (' + esc(e.message) + '). Revisá que "Geocoding API" esté activada.</div>';
-      return;
-    }
-    if(ui.activeTab !== 'agenda' || ui.selectedDate !== date) return;
-    container = document.getElementById('daymap-container');
-    if(!container) return;
-    if(points.length === 0){
-      container.innerHTML = '<div class="empty-hint">No pudimos ubicar esos lugares en el mapa. Probá con nombres más específicos.</div>';
-      return;
-    }
-    container.innerHTML = '<div id="gmap-canvas" style="height:220px; border-radius:10px; overflow:hidden;"></div>' +
-      '<div class="btn-row" style="margin-top:8px;"><a class="btn violet full" style="text-decoration:none; display:flex; align-items:center; justify-content:center;" target="_blank" rel="noopener" href="'+buildGmapsUrl(stops)+'">🧭 Abrir ruta en Google Maps</a></div>';
-    var map = new google.maps.Map(document.getElementById('gmap-canvas'), {
-      zoom: 13, center: points[0], disableDefaultUI: false, streetViewControl:false, mapTypeControl:false
-    });
-    var bounds = new google.maps.LatLngBounds();
-    points.forEach(function(p){
-      var marker = new google.maps.Marker({
-        position: {lat:p.lat, lng:p.lng}, map: map, title: p.label,
-        label: {text:String(p.n), color:'#1a1305', fontWeight:'700', fontSize:'12px'},
-        icon: { path: google.maps.SymbolPath.CIRCLE, fillColor:'#b8a1f5', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, scale:14 }
+      if(!container) return;
+      if(points.length === 0){
+        container.innerHTML = '<div class="empty-hint">No pudimos ubicar esos lugares en el mapa. Elegí la sugerencia de Google al escribir el nombre de la idea.</div>';
+        return;
+      }
+      container.innerHTML = '<div id="gmap-canvas" style="height:220px; border-radius:10px; overflow:hidden;"></div>' +
+        '<div class="btn-row" style="margin-top:8px;"><a class="btn violet full" style="text-decoration:none; display:flex; align-items:center; justify-content:center;" target="_blank" rel="noopener" href="'+buildGmapsUrl(stops)+'">🧭 Abrir ruta en Google Maps</a></div>';
+      var map = new google.maps.Map(document.getElementById('gmap-canvas'), {
+        zoom: 13, center: points[0], disableDefaultUI: false, streetViewControl:false, mapTypeControl:false
       });
-      bounds.extend(marker.getPosition());
-    });
-    if(points.length > 1){
-      new google.maps.Polyline({
-        path: points.map(function(p){ return {lat:p.lat, lng:p.lng}; }),
-        map: map, strokeColor:'#b8a1f5', strokeOpacity:0.8, strokeWeight:3
+      var bounds = new google.maps.LatLngBounds();
+      points.forEach(function(p){
+        var marker = new google.maps.Marker({
+          position: {lat:p.lat, lng:p.lng}, map: map, title: p.label,
+          label: {text:String(p.n), color:'#1a1305', fontWeight:'700', fontSize:'12px'},
+          icon: { path: google.maps.SymbolPath.CIRCLE, fillColor:'#b8a1f5', fillOpacity:1, strokeColor:'#fff', strokeWeight:2, scale:14 }
+        });
+        bounds.extend(marker.getPosition());
       });
-      map.fitBounds(bounds, 32);
-    } else {
-      map.setCenter(points[0]); map.setZoom(15);
+      if(points.length > 1){
+        new google.maps.Polyline({
+          path: points.map(function(p){ return {lat:p.lat, lng:p.lng}; }),
+          map: map, strokeColor:'#b8a1f5', strokeOpacity:0.8, strokeWeight:3
+        });
+        map.fitBounds(bounds, 32);
+      } else {
+        map.setCenter(points[0]); map.setZoom(15);
+      }
+      currentGMap = map;
+    }catch(e){
+      var c2 = document.getElementById('daymap-container');
+      if(c2) c2.innerHTML = '<div class="empty-hint">No se pudo cargar el mapa (' + esc(e.message||String(e)) + ').</div>';
     }
-    currentGMap = map;
   }
 
   /* ==================== App actions ==================== */
@@ -1457,6 +1493,8 @@
     saveIdea: function(ev, id){
       ev.preventDefault();
       var existing = id ? (state.ideas||[]).find(function(i){return i.id===id;}) : null;
+      var latRaw = document.getElementById('i-lat').value;
+      var lngRaw = document.getElementById('i-lng').value;
       var rec = {
         id: id || uid(),
         cityId: document.getElementById('i-city').value,
@@ -1465,6 +1503,8 @@
         duration: document.getElementById('i-dur').value.trim(),
         category: document.getElementById('i-cat').value,
         notes: document.getElementById('i-notes').value.trim(),
+        lat: latRaw !== '' ? parseFloat(latRaw) : null,
+        lng: lngRaw !== '' ? parseFloat(lngRaw) : null,
         assignedDate: existing ? existing.assignedDate : (ui.modal.payload.date || null)
       };
       if(!rec.title) return;
