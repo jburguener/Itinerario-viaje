@@ -108,7 +108,7 @@
   /* ---------- summary dashboard ---------- */
   .summary-stats{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom: 18px; }
   .stat-card{ flex:1 1 68px; background:var(--panel); border:1px solid var(--border-soft); border-radius:10px; padding:10px 6px; text-align:center; }
-  .stat-num{ font-family:var(--mono); font-size:19px; font-weight:700; color:var(--amber); }
+  .stat-num{ font-family:var(--mono); font-size:17px; font-weight:700; color:var(--amber); word-break: break-word; line-height:1.2; }
   .stat-label{ font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.5px; margin-top:3px; line-height:1.3; }
   .summary-day-row{
     display:flex; align-items:center; gap:10px; background:var(--panel); border:1px solid var(--border-soft);
@@ -121,6 +121,19 @@
   .summary-day-city{ font-size:13px; font-weight:600; }
   .summary-day-badges{ display:flex; gap:8px; font-size:11px; color:var(--muted); flex-wrap:wrap; margin-top:3px; }
   .summary-today{ border-color: var(--amber); }
+
+  /* ---------- expense row ---------- */
+  .expense-row{
+    display:flex; flex-wrap: wrap; align-items:center; gap: 8px 12px; background: var(--panel); border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--amber-dim); border-radius: 8px; padding: 11px 12px; margin-bottom: 8px;
+  }
+  .expense-icon{ font-size: 18px; width: 26px; flex-shrink:0; text-align:center; }
+  .expense-body{ flex: 1 1 130px; min-width: 130px; }
+  .expense-desc{ font-size: 14px; font-weight: 600; }
+  .expense-sub{ font-size: 11px; color: var(--muted); margin-top: 2px; font-family: var(--mono); }
+  .expense-notes{ font-size: 12px; color: var(--muted-2); margin-top: 4px; white-space: pre-wrap; }
+  .expense-amount{ font-family: var(--mono); font-size: 14px; font-weight: 700; color: var(--amber); flex-shrink: 0; white-space: nowrap; }
+  .expense-amount .cur{ font-size: 10px; color: var(--muted); font-weight: 400; }
 
   /* ---------- day strip (boarding-pass stubs) ---------- */
   .day-strip{
@@ -362,6 +375,9 @@
   var MODE_ICON = {'Vuelo':'✈️','Tren':'🚆','Bus':'🚌','Auto / traslado privado':'🚗','Barco':'⛴️','Otro':'➡️'};
   var STAY_TYPES = ['Hotel','Tren nocturno','Otro'];
   var STAY_ICON = {'Hotel':'🏨','Tren nocturno':'🚋','Otro':'🛏️'};
+  var EXPENSE_CATS = ['Comida','Transporte','Alojamiento','Entradas/actividades','Compras','Otro'];
+  var EXPENSE_ICON = {'Comida':'🍽️','Transporte':'🚌','Alojamiento':'🏨','Entradas/actividades':'🎟️','Compras':'🛍️','Otro':'💰'};
+  var LAST_CURRENCY_KEY = 'itinerario_last_currency_v1';
 
   /* ==================== state ==================== */
   var state = null; // {tripName, cities:[{id,name,startDate,endDate}], fixedEvents:[...], ideas:[...]}
@@ -619,6 +635,32 @@
   function allStaysSorted(){
     return (state.stays||[]).slice().sort(function(a,b){ return (a.checkIn||'').localeCompare(b.checkIn||''); });
   }
+  function expensesForDate(date){
+    return (state.expenses||[]).filter(function(e){ return e.date === date; });
+  }
+  function allExpensesSorted(){
+    return (state.expenses||[]).slice().sort(function(a,b){ return (a.date||'').localeCompare(b.date||''); });
+  }
+  function expenseTotalsByCurrency(){
+    var totals = {};
+    (state.expenses||[]).forEach(function(e){
+      var cur = e.currency || '?';
+      var amt = parseFloat(e.amount) || 0;
+      totals[cur] = (totals[cur]||0) + amt;
+    });
+    return totals;
+  }
+  function fmtMoney(n){
+    return (Math.round(n*100)/100).toLocaleString('es-AR', {minimumFractionDigits:2, maximumFractionDigits:2});
+  }
+  function getLastCurrency(){
+    if(!LOCAL_OK) return '';
+    try{ return window.localStorage.getItem(LAST_CURRENCY_KEY) || ''; }catch(e){ return ''; }
+  }
+  function setLastCurrency(c){
+    if(!LOCAL_OK) return;
+    try{ window.localStorage.setItem(LAST_CURRENCY_KEY, c); }catch(e){}
+  }
   function fixedForDay(cityId, date){
     return (state.fixedEvents||[]).filter(function(e){ return e.cityId===cityId && e.date===date; })
       .sort(function(a,b){
@@ -661,7 +703,7 @@
     ensureSelectedDay();
     var html = renderHeader();
     html += renderTabs();
-    var body = ui.activeTab==='resumen' ? renderSummaryTab() : (ui.activeTab==='agenda' ? renderAgenda() : (ui.activeTab==='traslados' ? renderTransfersTab() : (ui.activeTab==='noches' ? renderStaysTab() : renderIdeasBank())));
+    var body = ui.activeTab==='resumen' ? renderSummaryTab() : (ui.activeTab==='agenda' ? renderAgenda() : (ui.activeTab==='traslados' ? renderTransfersTab() : (ui.activeTab==='noches' ? renderStaysTab() : (ui.activeTab==='gastos' ? renderExpensesTab() : renderIdeasBank()))));
     html += '<main>' + body + '</main>';
     if(ui.modal){ html += renderModal(); }
     root.innerHTML = html;
@@ -705,6 +747,7 @@
       '<button class="tab-btn'+(ui.activeTab==='traslados'?' active':'')+'" onclick="App.setTab(\'traslados\')">Traslados</button>' +
       '<button class="tab-btn'+(ui.activeTab==='noches'?' active':'')+'" onclick="App.setTab(\'noches\')">Noches</button>' +
       '<button class="tab-btn'+(ui.activeTab==='ideas'?' active':'')+'" onclick="App.setTab(\'ideas\')">Ideas</button>' +
+      '<button class="tab-btn'+(ui.activeTab==='gastos'?' active':'')+'" onclick="App.setTab(\'gastos\')">Gastos</button>' +
     '</div>';
   }
 
@@ -714,12 +757,15 @@
       return '<div class="empty-hint">Agregá ciudades con fechas para ver el resumen del viaje.</div>';
     }
     var pendingIdeas = (state.ideas||[]).filter(function(i){ return !i.assignedDate; }).length;
+    var totalsByCur = expenseTotalsByCurrency();
+    var totalsLabel = Object.keys(totalsByCur).map(function(c){ return fmtMoney(totalsByCur[c])+' '+c; }).join(' + ') || '0';
     var html = '<div class="summary-stats">' +
       statCard(days.length, days.length===1?'Día':'Días') +
       statCard(state.cities.length, state.cities.length===1?'Ciudad':'Ciudades') +
       statCard((state.transfers||[]).length, 'Traslados') +
       statCard((state.stays||[]).length, 'Alojam.') +
       statCard(pendingIdeas, 'Ideas s/asignar') +
+      statCard(totalsLabel, 'Gastado') +
     '</div>';
 
     html += '<div class="section-label">Día a día — tocá uno para abrirlo<div class="line"></div></div>';
@@ -729,12 +775,14 @@
       var ideaCount = d.cityId ? ideasAssignedForDay(d.cityId, d.date).length : 0;
       var hasTransfer = transfersForDate(d.date).length > 0;
       var hasStay = staysForDate(d.date).length > 0;
+      var expenseCount = expensesForDate(d.date).length;
       var isToday = d.date === t;
       var badges = [];
       if(fixedCount) badges.push('🎫 '+fixedCount);
       if(ideaCount) badges.push('💡 '+ideaCount);
       if(hasTransfer) badges.push('✈️');
       if(hasStay) badges.push('🏨');
+      if(expenseCount) badges.push('💰 '+expenseCount);
       if(badges.length === 0) badges.push('Sin plan cargado');
       html += '<div class="summary-day-row'+(isToday?' summary-today':'')+'" onclick="App.goToDaySummary(\''+d.date+'\')">' +
         '<div class="summary-day-date">'+dowLabel(d.date)+' <span class="n">'+String(dayNum(d.date)).padStart(2,'0')+'</span> '+monLabel(d.date)+(isToday?' · HOY':'')+'</div>' +
@@ -921,6 +969,48 @@
     return html;
   }
 
+  function renderExpenseRow(e){
+    var confirmMode = ui.pendingDelete === e.id;
+    var icon = EXPENSE_ICON[e.category] || '💰';
+    return '<div class="expense-row">' +
+      '<div class="expense-icon">'+icon+'</div>' +
+      '<div class="expense-body">' +
+        '<div class="expense-desc">'+esc(e.description||e.category||'Gasto')+'</div>' +
+        '<div class="expense-sub">'+fullLabel(e.date)+(e.category?' · '+esc(e.category):'')+'</div>' +
+        (e.notes ? '<div class="expense-notes">'+esc(e.notes)+'</div>' : '') +
+      '</div>' +
+      '<div class="expense-amount">'+fmtMoney(parseFloat(e.amount)||0)+' <span class="cur">'+esc(e.currency||'')+'</span></div>' +
+      '<div class="row-actions">' +
+        (confirmMode ?
+          ('<button class="icon-btn confirm" onclick="App.deleteExpense(\''+e.id+'\')">Sí, borrar</button>' +
+           '<button class="icon-btn" onclick="App.cancelDelete()">Cancelar</button>')
+          :
+          ('<button class="icon-btn" onclick="App.openExpenseForm(\''+e.id+'\')">Editar</button>' +
+           '<button class="icon-btn danger" onclick="App.askDelete(\''+e.id+'\')">Borrar</button>')
+        ) +
+      '</div>' +
+    '</div>';
+  }
+
+  function renderExpensesTab(){
+    var list = allExpensesSorted();
+    var totals = expenseTotalsByCurrency();
+    var currencies = Object.keys(totals);
+    var html = '<div class="btn-row"><button class="btn primary full" onclick="App.openExpenseForm(null)">+ Agregar gasto</button></div>';
+    if(currencies.length){
+      html += '<div class="summary-stats">' + currencies.map(function(c){
+        return statCard(fmtMoney(totals[c]), c);
+      }).join('') + '</div>';
+    }
+    html += '<div class="section-label">Todos los gastos<div class="line"></div></div>';
+    if(list.length === 0){
+      html += '<div class="empty-hint">Todavía no cargaste ningún gasto.</div>';
+    } else {
+      list.forEach(function(e){ html += renderExpenseRow(e); });
+    }
+    return html;
+  }
+
   function renderFixedRow(e){
     var confirmMode = ui.pendingDelete === e.id;
     return '<div class="event-row">' +
@@ -1059,6 +1149,7 @@
     else if(m.type === 'idea') backHtml += renderIdeaForm(m.payload);
     else if(m.type === 'transfer') backHtml += renderTransferForm(m.payload);
     else if(m.type === 'stay') backHtml += renderStayForm(m.payload);
+    else if(m.type === 'expense') backHtml += renderExpenseForm(m.payload);
     else if(m.type === 'backup') backHtml += renderBackupQuick();
     else if(m.type === 'howto') backHtml += renderHowTo();
     else if(m.type === 'settings') backHtml += renderSettingsForm();
@@ -1165,6 +1256,28 @@
         '<div class="modal-actions">' +
           '<button type="button" class="btn ghost" onclick="App.closeModal()">Cancelar</button>' +
           '<button type="submit" class="btn sleep">Guardar</button>' +
+        '</div>' +
+      '</form>';
+  }
+
+  function renderExpenseForm(p){
+    var editing = p.id ? (state.expenses||[]).find(function(e){return e.id===p.id;}) : null;
+    var date = editing ? editing.date : p.date;
+    var catOpts = EXPENSE_CATS.map(function(c){ return '<option'+(editing&&editing.category===c?' selected':'')+'>'+c+'</option>'; }).join('');
+    var currency = editing ? editing.currency : getLastCurrency();
+    return '<h3>'+(editing?'Editar':'Nuevo')+' gasto</h3>' +
+      '<form onsubmit="App.saveExpense(event, \''+(editing?editing.id:'')+'\')">' +
+        '<div class="field-row">' +
+          '<div class="field"><label>Monto</label><input id="ex-amount" type="number" step="0.01" min="0" required placeholder="0.00" value="'+(editing?editing.amount:'')+'"></div>' +
+          '<div class="field"><label>Moneda</label><input id="ex-currency" type="text" required placeholder="Ej: EUR, USD" value="'+esc(currency||'')+'"></div>' +
+        '</div>' +
+        '<div class="field"><label>Fecha</label><input id="ex-date" type="date" required value="'+(date||todayISO())+'"></div>' +
+        '<div class="field"><label>Descripción</label><input id="ex-desc" type="text" placeholder="Ej: Cena en Trastevere" value="'+esc(editing?editing.description:'')+'"></div>' +
+        '<div class="field"><label>Categoría</label><select id="ex-cat">'+catOpts+'</select></div>' +
+        '<div class="field"><label>Notas (opcional)</label><textarea id="ex-notes">'+esc(editing?editing.notes:'')+'</textarea></div>' +
+        '<div class="modal-actions">' +
+          '<button type="button" class="btn ghost" onclick="App.closeModal()">Cancelar</button>' +
+          '<button type="submit" class="btn primary">Guardar</button>' +
         '</div>' +
       '</form>';
   }
@@ -1576,6 +1689,10 @@
       ui.modal = {type:'stay', payload: {id: id||null, cityId: cityId||null, date: date || todayISO()}};
       render();
     },
+    openExpenseForm: function(id, date){
+      ui.modal = {type:'expense', payload: {id: id||null, date: date || todayISO()}};
+      render();
+    },
     closeModal: function(){ ui.modal = null; render(); },
 
     saveFixed: function(ev, id){
@@ -1712,6 +1829,30 @@
       ui.pendingDelete = null; render(); persist('Alojamiento borrado');
     },
 
+    saveExpense: function(ev, id){
+      ev.preventDefault();
+      var rec = {
+        id: id || uid(),
+        amount: parseFloat(document.getElementById('ex-amount').value) || 0,
+        currency: document.getElementById('ex-currency').value.trim().toUpperCase(),
+        date: document.getElementById('ex-date').value,
+        description: document.getElementById('ex-desc').value.trim(),
+        category: document.getElementById('ex-cat').value,
+        notes: document.getElementById('ex-notes').value.trim()
+      };
+      if(!rec.date || !rec.currency || !(rec.amount>0)) return;
+      setLastCurrency(rec.currency);
+      state.expenses = state.expenses || [];
+      var idx = state.expenses.findIndex(function(e){return e.id===rec.id;});
+      if(idx>=0) state.expenses[idx] = rec; else state.expenses.push(rec);
+      ui.modal = null;
+      render(); persist('Gasto guardado');
+    },
+    deleteExpense: function(id){
+      state.expenses = (state.expenses||[]).filter(function(e){return e.id!==id;});
+      ui.pendingDelete = null; render(); persist('Gasto borrado');
+    },
+
     askDelete: function(id){ ui.pendingDelete = id; render(); },
     cancelDelete: function(){ ui.pendingDelete = null; render(); },
 
@@ -1745,6 +1886,7 @@
       parsed.ideas = parsed.ideas || [];
       parsed.transfers = parsed.transfers || [];
       parsed.stays = parsed.stays || [];
+      parsed.expenses = parsed.expenses || [];
       parsed.mapPlaces = parsed.mapPlaces || [];
       state = parsed;
       ui.modal = null; ui.selectedDate = null; ui.pendingDelete = null;
@@ -1773,6 +1915,7 @@
         ideas: [],
         transfers: [],
         stays: [],
+        expenses: [],
         mapPlaces: []
       };
       onboardCities = null; onboardTripName = '';
