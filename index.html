@@ -191,6 +191,8 @@
   }
   .idea-body{ flex: 1 1 150px; min-width: 150px; }
   .idea-title{ font-size: 14px; font-weight: 600; }
+  .idea-row.visited{ opacity: 0.55; }
+  .idea-row.visited .idea-title{ text-decoration: line-through; }
   .idea-zone{ font-family: var(--mono); font-size: 10px; color: var(--teal); text-transform: uppercase; letter-spacing: .5px; }
   .idea-notes{ font-size: 12px; color: var(--muted-2); margin-top: 4px; white-space: pre-wrap; }
   .idea-cat{ display:inline-block; font-family: var(--mono); font-size: 9px; text-transform: uppercase; letter-spacing: .5px; color: var(--teal-dim); border: 1px solid var(--teal-dim); border-radius: 4px; padding: 1px 5px; margin-top: 5px; }
@@ -972,7 +974,8 @@
       });
     }
     var isFood = i.category === 'Comida';
-    return '<div class="idea-row'+(isFood?' food':'')+'">' +
+    var isVisited = !!i.visited;
+    return '<div class="idea-row'+(isFood?' food':'')+(isVisited?' visited':'')+'">' +
       (assignedContext ? '<div class="map-pin" style="flex-shrink:0; align-self:flex-start;">'+(idx+1)+'</div>' : '') +
       '<div class="idea-body">' +
         '<div class="idea-zone">'+esc(i.zone||'Sin zona')+'</div>' +
@@ -986,7 +989,8 @@
           ('<button class="icon-btn confirm" onclick="App.deleteIdea(\''+i.id+'\')">Sí, borrar</button>' +
            '<button class="icon-btn" onclick="App.cancelDelete()">Cancelar</button>')
           :
-          ((assignedContext ?
+          ('<button class="icon-btn" onclick="App.toggleVisited(\''+i.id+'\')">'+(isVisited?'✅ Visitado':'☐ Visitar')+'</button>' +
+           (assignedContext ?
              ((idx>0 ? '<button class="icon-btn" onclick="App.moveIdea(\''+i.id+'\',-1)">↑</button>' : '') +
               (idx<total-1 ? '<button class="icon-btn" onclick="App.moveIdea(\''+i.id+'\',1)">↓</button>' : ''))
              : '') +
@@ -1693,7 +1697,8 @@
         notes: document.getElementById('i-notes').value.trim(),
         lat: latRaw !== '' ? parseFloat(latRaw) : null,
         lng: lngRaw !== '' ? parseFloat(lngRaw) : null,
-        assignedDate: existing ? existing.assignedDate : (ui.modal.payload.date || null)
+        assignedDate: existing ? existing.assignedDate : (ui.modal.payload.date || null),
+        visited: existing ? !!existing.visited : false
       };
       if(!rec.title) return;
       state.ideas = state.ideas || [];
@@ -1723,6 +1728,12 @@
       var ai = state.ideas.indexOf(idea), bi = state.ideas.indexOf(other);
       state.ideas[ai] = other; state.ideas[bi] = idea;
       render(); persist('Orden actualizado');
+    },
+    toggleVisited: function(id){
+      var idea = (state.ideas||[]).find(function(x){return x.id===id;});
+      if(!idea) return;
+      idea.visited = !idea.visited;
+      render(); persist(idea.visited ? 'Marcada como visitada' : 'Marcada como pendiente');
     },
     saveGMapsKey: function(){
       var k = document.getElementById('gmaps-key-input').value.trim();
